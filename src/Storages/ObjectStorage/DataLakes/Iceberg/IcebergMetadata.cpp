@@ -687,10 +687,36 @@ ManifestListPtr IcebergMetadata::getManifestList(const String & filename) const
     {
         manifest_file_cache_keys = create_fn();
     }
-    for (const auto & entry : manifest_file_cache_keys)
+
+    const size_t manifest_count = manifest_file_cache_keys.size();
+
+    if (manifest_count <= 4)
     {
-        auto manifest_file_ptr = getManifestFile(entry.manifest_file_path, entry.added_sequence_number);
-        manifest_list.push_back(manifest_file_ptr);
+        for (const auto & entry : manifest_file_cache_keys)
+        {
+            auto manifest_file_ptr = getManifestFile(entry.manifest_file_path, entry.added_sequence_number);
+            manifest_list.push_back(manifest_file_ptr);
+        }
+    }
+    else
+    {
+        LOG_DEBUG(log, "Loading {} manifest files using ThreadPool", manifest_count);
+        
+        auto & thread_pool = getContext()->getIcebergCatalogThreadpool();
+        ThreadPoolCallbackRunnerLocal<void> runner(thread_pool, "IcebergManifestLoader");
+        
+        std::mutex manifest_list_mutex;
+        
+        for (const auto & entry : manifest_file_cache_keys)
+        {
+            runner([this, &entry, &manifest_list, &manifest_list_mutex]() {
+                auto manifest_file_ptr = getManifestFile(entry.manifest_file_path, entry.added_sequence_number);
+                std::lock_guard lock(manifest_list_mutex);
+                manifest_list.push_back(manifest_file_ptr);
+            });
+        }
+        
+        runner.waitForAllToFinishAndRethrowFirstError();
     }
     ManifestListPtr manifest_list_ptr = std::make_shared<ManifestList>(std::move(manifest_list));
     initializeDataFiles(manifest_list_ptr);
