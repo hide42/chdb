@@ -94,7 +94,8 @@ std::pair<size_t, size_t> parseDecimal(const String & type_name)
 std::string IcebergSchemaProcessor::default_link{};
 
 void IcebergSchemaProcessor::addIcebergTableSchema(Poco::JSON::Object::Ptr schema_ptr)
-{
+{   
+    std::lock_guard lock(mutex);
     Int32 schema_id = schema_ptr->getValue<Int32>("schema-id");
     current_schema_id = schema_id;
     if (iceberg_table_schemas_by_ids.contains(schema_id))
